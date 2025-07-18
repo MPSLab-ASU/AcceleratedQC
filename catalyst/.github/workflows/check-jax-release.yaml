@@ -1,0 +1,99 @@
+name: Check Catalyst against latest JAX
+
+on:
+  schedule:
+    - cron: "30 1 1,15 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-jax:
+    name: Build/Test Catalyst against JAX
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        interop: [true, false]
+
+    steps:
+    - name: Checkout Catalyst repo
+      uses: actions/checkout@v4
+
+    - name: Install deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang lld
+        python3 -m pip install -r requirements.txt
+        echo "COMPILER_LAUNCHER=" >> $GITHUB_ENV
+
+    - name: Discover JAX dep hashes
+      if: matrix.interop
+      run: |
+        python3 -m pip install --upgrade jaxlib
+        python3 .github/workflows/set_dep_versions.py $(python3 -c "import jaxlib; print(jaxlib.__version__)")
+
+    - name: Re-read versions
+      run: |
+        echo "LLVM_REVISION=$(grep llvm .dep-versions | awk -F '=' '{ print $2 }')" >> $GITHUB_ENV
+        echo "MHLO_REVISION=$(grep mhlo .dep-versions | awk -F '=' '{ print $2 }')" >> $GITHUB_ENV
+        echo "ENZYME_REVISION=$(grep enzyme .dep-versions | awk -F '=' '{ print $2 }')" >> $GITHUB_ENV
+
+    - name: Clone LLVM repo
+      uses: actions/checkout@v4
+      with:
+        repository: llvm/llvm-project
+        ref: ${{ env.LLVM_REVISION }}
+        path: mlir/llvm-project
+
+    - name: Clone MHLO repo
+      uses: actions/checkout@v4
+      with:
+        repository: tensorflow/mlir-hlo
+        ref: ${{ env.MHLO_REVISION }}
+        path: mlir/mlir-hlo
+
+    - name: Clone Enzyme repo
+      uses: actions/checkout@v4
+      with:
+        repository: EnzymeAD/Enzyme
+        ref: ${{ env.ENZYME_REVISION }}
+        path: mlir/Enzyme
+
+    - name: Build Runtime
+      run: |
+        make runtime
+
+    - name: Build LLVM
+      run: |
+        make llvm
+
+    - name: Build MHLO
+      run: |
+        make mhlo
+
+    - name: Build Enzyme
+      run: |
+        make enzyme
+
+    - name: Build MLIR Dialects
+      run: |
+        make dialects
+
+    - name: Build Frontend
+      run: |
+        make frontend
+
+    - name: Run Frontend LIT suite
+      run: |
+        make lit
+
+    - name: Run Frontend PyTest suite
+      run: |
+        make pytest
+
+    - name: Run Demos
+      run: |
+        make test-demos

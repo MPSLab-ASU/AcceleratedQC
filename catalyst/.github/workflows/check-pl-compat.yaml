@@ -1,0 +1,204 @@
+name: Check PennyLane/Lightning Compatibility
+
+on:
+  workflow_call:
+    inputs:
+      catalyst:
+        required: true
+        type: string
+      pennylane:
+        required: true
+        type: string
+      lightning:
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  constants:
+    name: "Set build matrix"
+    uses: ./.github/workflows/constants.yaml
+    with:
+      use_release_tag: ${{ inputs.catalyst == 'stable' }}
+
+  check-config:
+    name: Build Configuration
+    needs: [constants]
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout Catalyst repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - if: ${{ inputs.catalyst == 'stable' }}
+      run: |
+        git checkout $(git tag | sort -V | tail -1)
+    - if: ${{ inputs.catalyst == 'release-candidate' }}
+      run: |
+        git checkout v0.12.0-rc
+
+    - name: Set up Python # Ensure python3.10 is used
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ needs.constants.outputs.primary_python_version }}
+
+    - name: Install deps
+      if: ${{ inputs.catalyst != 'stable' }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ccache libasan6 lld
+
+    - name: Install deps (Python)
+      run: |
+        python3 --version | grep ${{ needs.constants.outputs.primary_python_version }}
+        python3 -m pip install -r requirements.txt
+        pip install amazon-braket-pennylane-plugin
+        echo "AWS_DEFAULT_REGION=us-east-1" >> $GITHUB_ENV
+
+    - name: Get Catalyst Build Dependencies (latest)
+      uses: actions/cache/restore@v4
+      if: ${{ inputs.catalyst != 'stable' }}
+      with:
+        path: mlir/llvm-project
+        key: llvm-${{ needs.constants.outputs.llvm_version }}-default-source
+        enableCrossOsArchive: True
+        fail-on-cache-miss: True
+    - uses: actions/cache/restore@v4
+      if: ${{ inputs.catalyst != 'stable' }}
+      with:
+        path: llvm-build
+        key: ${{ runner.os }}-llvm-${{ needs.constants.outputs.llvm_version }}-ci-build-gcc
+        fail-on-cache-miss: True
+    - uses: actions/cache/restore@v4
+      if: ${{ inputs.catalyst != 'stable' }}
+      with:
+        path: mlir/mlir-hlo
+        key: mhlo-${{ needs.constants.outputs.mhlo_version }}-default-source
+        enableCrossOsArchive: True
+        fail-on-cache-miss: True
+    - uses: actions/cache/restore@v4
+      if: ${{ inputs.catalyst != 'stable' }}
+      with:
+        path: mhlo-build
+        key: ${{ runner.os }}-mhlo-${{ needs.constants.outputs.mhlo_version }}-ci-build-gcc
+        fail-on-cache-miss: True
+    - uses: actions/cache/restore@v4
+      if: ${{ inputs.catalyst != 'stable' }}
+      with:
+        path:  mlir/Enzyme
+        key: enzyme-${{ needs.constants.outputs.enzyme_version }}-default-source
+        enableCrossOsArchive: True
+        fail-on-cache-miss: True
+    - uses: actions/cache@v4
+      if: ${{ inputs.catalyst != 'stable' }}
+      with:
+        path: enzyme-build
+        key: ${{ runner.os }}-enzyme-${{ needs.constants.outputs.llvm_version }}-${{ needs.constants.outputs.enzyme_version }}-ci-build-gcc
+        fail-on-cache-miss: True
+    - uses: actions/cache/restore@v4
+      if: ${{ inputs.catalyst != 'stable' }}
+      with:
+        path: .ccache
+        key: ${{ runner.os }}-ccache-${{ github.run_id }}
+        restore-keys: ${{ runner.os }}-ccache-
+
+    - name: Install Catalyst (stable)
+      if: ${{ inputs.catalyst == 'stable' }}
+      run: |
+        pip install pennylane-catalyst
+
+    - name: Install Catalyst (latest/release-candidate)
+      if: ${{ inputs.catalyst != 'stable' }}
+      run: |
+        CCACHE_DIR="$(pwd)/.ccache" \
+        C_COMPILER=$(which gcc }}) \
+        CXX_COMPILER=$(which g++ }}) \
+        ENABLE_LLD=ON \
+        RT_BUILD_DIR="$(pwd)/runtime-build" \
+        LLVM_BUILD_DIR="$(pwd)/llvm-build" \
+        MHLO_BUILD_DIR="$(pwd)/mhlo-build" \
+        ENZYME_BUILD_DIR="$(pwd)/enzyme-build" \
+        DIALECTS_BUILD_DIR="$(pwd)/quantum-build" \
+        ENABLE_OPENQASM=ON \
+        make catalyst
+
+    - name: Install PennyLane-Lightning (stable)
+      if: ${{ inputs.lightning == 'stable' }}
+      run: |
+        pip install --no-deps --force pennylane-lightning
+        pip install --no-deps --force pennyLane-lightning-kokkos
+
+    - name: Download PennyLane-Lightning (latest)
+      if: ${{ inputs.lightning == 'latest' }}
+      uses: actions/checkout@v4
+      with:
+        repository: PennyLaneAI/pennylane-lightning
+        ref: master
+        path: lightning_build
+        fetch-depth: 0
+
+    - name: Download PennyLane-Lightning (release-candidate)
+      if: ${{ inputs.lightning == 'release-candidate' }}
+      uses: actions/checkout@v4
+      with:
+        repository: PennyLaneAI/pennylane-lightning
+        ref: v0.42.0_rc
+        path: lightning_build
+        fetch-depth: 0
+
+    - name: Install PennyLane-Lightning (latest/release-candidate)
+      if: ${{ inputs.lightning != 'stable' }}
+      run: |
+        # Lightning-Kokkos can no longer be installed with pip from git
+        cd lightning_build
+        pip install --no-deps --force .
+        PL_BACKEND=lightning_kokkos python scripts/configure_pyproject_toml.py
+        pip install --no-deps --force .
+
+    # PennyLane doesn't update its dev version number on every commit like Lightning, so we need to
+    # force the package to be re-installed. First, handle potential dependency changes, then force
+    # install the package itself.
+    - name: Install PennyLane (latest)
+      if: ${{ inputs.pennylane == 'latest' }}
+      run: |
+        pip install --no-deps --force git+https://github.com/PennyLaneAI/pennylane@master
+
+    - name: Install PennyLane (stable)
+      if: ${{ inputs.pennylane == 'stable' }}
+      run: |
+        pip install --no-deps --force pennylane
+
+    - name: Install PennyLane (release-candidate)
+      if: ${{ inputs.pennylane == 'release-candidate' }}
+      run: |
+        pip install --no-deps --force git+https://github.com/PennyLaneAI/pennylane@v0.42.0-rc0
+
+    - name: Add Frontend Dependencies to PATH
+      if: ${{ inputs.catalyst != 'stable' }}
+      run: |
+        echo "PYTHONPATH=$PYTHONPATH:$(pwd)/quantum-build/python_packages/quantum" >> $GITHUB_ENV
+        echo "RUNTIME_LIB_DIR=$(pwd)/runtime-build/lib" >> $GITHUB_ENV
+        echo "MLIR_LIB_DIR=$(pwd)/llvm-build/lib" >> $GITHUB_ENV
+        echo "CATALYST_BIN_DIR=$(pwd)/quantum-build/bin" >> $GITHUB_ENV
+        chmod +x $(pwd)/quantum-build/bin/catalyst  # artifact upload does not preserve permissions
+
+    - name: Run Frontend Tests
+      run: |
+        make pytest
+
+    - name: Run Frontend Tests (Kokkos)
+      run: |
+        make pytest TEST_BACKEND="lightning.kokkos"
+
+    - name: Run Frontend Tests (Braket)
+      run: |
+        make pytest TEST_BRAKET=LOCAL
+
+    - name: Run Demos
+      run: | # Do not run demos in parallel, seems to cause package issues with numpy.
+        MDD_BENCHMARK_PRECISION=1 \
+        python3 -m pytest demos --nbmake

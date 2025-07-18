@@ -1,0 +1,15 @@
+[submodule "mlir-hlo"]
+	path = mlir/mlir-hlo
+	url = https://github.com/tensorflow/mlir-hlo.git
+	shallow = true
+	ignore = dirty
+[submodule "llvm-project"]
+	path = mlir/llvm-project
+	url = https://github.com/llvm/llvm-project.git
+	shallow = true
+	ignore = dirty
+[submodule "Enzyme"]
+	path = mlir/Enzyme
+	url = https://github.com/EnzymeAD/Enzyme.git
+	shallow = true
+	ignore = dirty

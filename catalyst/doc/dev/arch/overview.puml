@@ -1,0 +1,21 @@
+@startuml
+!include <C4/C4_Container.puml>
+
+!include common.iuml
+
+HIDE_STEREOTYPE()
+
+Boundary(c1, "Catalyst", $link="https://github.com/plantuml-stdlib/C4-PlantUML") {
+
+  Container(_tracer_, "Frontend", "PennyLane / JAX", "Python code tracer and compiler driver")
+
+  Container(_qopt_, "Core", "LLVM / MLIR", "Quantum-specific dialects, passes and tools")
+
+  Container(_catalyst_runtime_, "Runtime", "C / C++", "The QIR Runtime backed by qir-stdlib")
+}
+
+Rel_R(_tracer_, _qopt_, "compiles with", "", $tags="action")
+
+Rel_R(_qopt_, _catalyst_runtime_, "links against", "", $tags="action")
+
+@enduml

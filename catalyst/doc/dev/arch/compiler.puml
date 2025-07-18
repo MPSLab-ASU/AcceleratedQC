@@ -1,0 +1,62 @@
+@startuml
+!include <C4/C4_Component>
+!include common.iuml
+
+HIDE_STEREOTYPE()
+HIDE_PERSON_SPRITE()
+
+System(_mlir_sys_, "workflow.mlir", $tags="object")
+
+System(_so_sys_, "workflow.so", $tags="object")
+
+Boundary(c1, "Compiler", $link="https://github.com/plantuml-stdlib/C4-PlantUML") {
+
+  Component(_nohlo_mlir_, "HLO Lowering", "mlir-hlo-opt", "Lower HLO dialects to standard MLIR dialects")
+
+  Boundary(c2, "Core", $link="https://github.com/plantuml-stdlib/C4-PlantUML") {
+
+    Component(_opt_mlir_, "Program Optimization", "quantum-opt", "Apply classical & quantum code optimizations")
+
+    Component(_grad_mlir_, "Hybrid AD", "quantum-opt", "Perform hybrid automatic differentiation")
+
+    Component(_buff_mlir_, "Bufferization", "quantum-opt", "Bufferize all dialects")
+
+    Component(_llvm_mlir_, "LLVM Dialect Conversion", "quantum-opt", "Lower all dialects to the LLVM dialect")
+  }
+
+  Component(_ll_, "LLVM IR Generation", "mlir-translate", "Convert the MLIR to LLVM IR assembly")
+
+  Component(_grad_ll_, "Enzyme AD", "opt", "Perform classical AD with Enzyme")
+
+  Component(_o_, "Code Generation", "llc", "Compile the LLVM code using the LLVM Static Compiler")
+
+  Component(_so_, "Linking", "variable", "Link the compiled file to the Runtime")
+
+}
+
+System_Ext(_catalyst_runtime_, "Catalyst Runtime")
+
+
+Rel_R(_mlir_sys_, _nohlo_mlir_, "*.mlir", "")
+
+Rel_D(_nohlo_mlir_, _opt_mlir_, "*.mlir", "")
+
+Rel_R(_opt_mlir_, _grad_mlir_, "*.mlir", "")
+
+Rel_R(_grad_mlir_, _buff_mlir_, "*.mlir", "")
+
+Rel_R(_buff_mlir_, _llvm_mlir_, "*.mlir", "")
+
+Rel(_llvm_mlir_, _ll_, "*.mlir", "")
+
+Rel_R(_ll_, _grad_ll_, "*.ll", "")
+
+Rel_R(_grad_ll_, _o_, "*.ll", "")
+
+Rel_R(_o_, _so_, "*.o", "")
+
+Rel_R(_so_, _so_sys_, "*.so", "")
+
+Rel_U(_catalyst_runtime_, _so_, "link", "", $tags="action")
+
+@enduml

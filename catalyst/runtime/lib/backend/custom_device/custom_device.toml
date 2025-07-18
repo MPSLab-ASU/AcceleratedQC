@@ -1,0 +1,33 @@
+# Custom Device Configuration for PennyLane
+# This file defines the capabilities and supported operations for the custom device
+
+schema = 3
+
+# Supported gates for the custom device
+[operators.gates]
+
+Hadamard = { }
+
+# Supported observables
+[operators.observables]
+
+State = { }
+
+# Measurement processes
+[measurement_processes]
+
+StateMP = { conditions = ["analytic"] }
+
+# Compilation settings
+[compilation]
+
+# Whether the device is compatible with qjit
+qjit_compatible = true
+# Whether the device requires run time generation of the quantum circuit
+runtime_code_generation = true
+# Supported mid-circuit measurement methods
+supported_mcm_methods = [ ]
+# Whether the device supports dynamic qubit allocation/deallocation
+dynamic_qubit_management = false
+# Whether simultaneous measurements of non-commuting observables is supported
+non_commuting_observables = false
