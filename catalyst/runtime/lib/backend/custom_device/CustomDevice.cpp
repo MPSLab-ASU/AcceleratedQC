@@ -6,6 +6,7 @@
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
+#include <filesystem>
 
 using std::vector;
 using std::string;
@@ -30,12 +31,53 @@ namespace Catalyst::Runtime::Devices {
 CustomDevice::CustomDevice([[maybe_unused]] const string &kwargs) {
     cout << "Constructor: CustomDevice\n";
     cout << "kwargs: " << kwargs << '\n';
+    
+    // Check if FPGA kernel is available
+    if (use_fpga_) {
+        std::filesystem::path xclbin_file(xclbin_path_);
+        if (!std::filesystem::exists(xclbin_file)) {
+            cout << "Warning: FPGA bitstream not found at " << xclbin_path_ 
+                 << ", falling back to CPU implementation\n";
+            use_fpga_ = false;
+        } else {
+            cout << "FPGA kernel enabled, using bitstream: " << xclbin_path_ << '\n';
+        }
+    }
+    
     printState(state_, "State after constructor");
 }
 
 CustomDevice::~CustomDevice() = default;
 
+bool CustomDevice::useFPGAKernel() const {
+    return use_fpga_;
+}
+
 void CustomDevice::applyHadamard(QubitIdType wire) {
+    if (useFPGAKernel()) {
+        // Use FPGA kernel
+        cout << "Applying Hadamard on wire " << wire << " using FPGA kernel\n";
+        
+        vector<complex<double>> output_state(state_.size());
+        int status = hadamard_kernel_execute(xclbin_path_, state_, output_state, wire, num_qubits_);
+        
+        if (status == 0) {
+            state_ = std::move(output_state);
+            printState(state_, "State after FPGA Hadamard on wire " + std::to_string(wire));
+        } else {
+            cerr << "FPGA kernel execution failed with status " << status 
+                 << ", falling back to CPU implementation\n";
+            // Fall back to CPU implementation
+            applyHadamardCPU(wire);
+        }
+    } else {
+        // Use CPU implementation
+        applyHadamardCPU(wire);
+    }
+}
+
+void CustomDevice::applyHadamardCPU(QubitIdType wire) {
+    cout << "Applying Hadamard on wire " << wire << " using CPU implementation\n";
     size_t dim = 1ULL << num_qubits_;
     vector<complex<double>> new_state(dim, 0.0);
     double sqrt2_inv = 1.0 / sqrt(2.0);
@@ -50,7 +92,7 @@ void CustomDevice::applyHadamard(QubitIdType wire) {
     }
 
     state_ = std::move(new_state);
-    printState(state_, "State after Hadamard on wire " + std::to_string(wire));
+    printState(state_, "State after CPU Hadamard on wire " + std::to_string(wire));
 }
 
 void CustomDevice::getState(DataView<complex<double>, 1> &state) {

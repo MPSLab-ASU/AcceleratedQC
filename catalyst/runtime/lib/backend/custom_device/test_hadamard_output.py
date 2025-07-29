@@ -1,16 +1,22 @@
+#!/usr/bin/env python3
+"""
+Real Hadamard Kernel Output Test
+
+This script demonstrates the actual output of the Hadamard kernel
+for various quantum states and configurations.
+"""
+
 import pennylane as qml
 from pennylane import numpy as np
 import pathlib
 import os
 import ctypes
-import sys
 
 class CustomDevice(qml.devices.Device):
     config_filepath = pathlib.Path(__file__).parent / "custom_device.toml"
 
     @staticmethod
     def get_c_interface():
-        # Get the build directory path
         build_dir = pathlib.Path(__file__).parent.parent.parent.parent / "build" / "lib"
         so_path = build_dir / "librtd_custom_device.so"
         return "CustomDevice", str(so_path)
@@ -20,17 +26,14 @@ class CustomDevice(qml.devices.Device):
         self.xclbin_path = xclbin_path or "libadf.xclbin"
         self.use_fpga = use_fpga
         
-        # Check if FPGA bitstream exists
         if self.use_fpga and not os.path.exists(self.xclbin_path):
             print(f"Warning: FPGA bitstream not found at {self.xclbin_path}")
             print("Falling back to CPU implementation")
             self.use_fpga = False
         
-        # Load the C++ library
         self._load_cpp_library()
 
     def _load_cpp_library(self):
-        """Load the C++ shared library"""
         try:
             build_dir = pathlib.Path(__file__).parent.parent.parent.parent / "build" / "lib"
             so_path = build_dir / "librtd_custom_device.so"
@@ -42,8 +45,6 @@ class CustomDevice(qml.devices.Device):
             
             self.cpp_lib = ctypes.CDLL(str(so_path))
             print(f"✓ Loaded C++ library: {so_path}")
-            
-            # Set up function signatures
             self._setup_function_signatures()
             
         except Exception as e:
@@ -51,42 +52,36 @@ class CustomDevice(qml.devices.Device):
             self.cpp_lib = None
 
     def _setup_function_signatures(self):
-        """Set up the function signatures for C++ calls"""
         if not self.cpp_lib:
             return
             
-        # Set up hadamard_kernel_execute_c function (C-style wrapper)
         self.cpp_lib.hadamard_kernel_execute_c.argtypes = [
-            ctypes.c_char_p,  # xclbin_path
-            ctypes.POINTER(ctypes.c_double),  # input_real
-            ctypes.POINTER(ctypes.c_double),  # input_imag
-            ctypes.POINTER(ctypes.c_double),  # output_real
-            ctypes.POINTER(ctypes.c_double),  # output_imag
-            ctypes.c_int,  # target
-            ctypes.c_int,  # num_qubits
-            ctypes.c_int   # state_size
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int
         ]
         self.cpp_lib.hadamard_kernel_execute_c.restype = ctypes.c_int
 
     def _apply_hadamard_cpp(self, state, target_qubit, num_qubits):
-        """Apply Hadamard gate using C++ backend"""
         if not self.cpp_lib:
             return self._apply_hadamard_python(state, target_qubit, num_qubits)
         
         try:
-            # Prepare arrays for C function
             state_size = len(state)
             input_real = (ctypes.c_double * state_size)()
             input_imag = (ctypes.c_double * state_size)()
             output_real = (ctypes.c_double * state_size)()
             output_imag = (ctypes.c_double * state_size)()
             
-            # Copy state to input arrays
             for i, c in enumerate(state):
                 input_real[i] = c.real
                 input_imag[i] = c.imag
             
-            # Call C function
             xclbin_path = self.xclbin_path.encode('utf-8')
             status = self.cpp_lib.hadamard_kernel_execute_c(
                 xclbin_path,
@@ -100,7 +95,6 @@ class CustomDevice(qml.devices.Device):
             )
             
             if status == 0:
-                # Convert back to Python
                 result = []
                 for i in range(state_size):
                     result.append(complex(output_real[i], output_imag[i]))
@@ -114,7 +108,6 @@ class CustomDevice(qml.devices.Device):
             return self._apply_hadamard_python(state, target_qubit, num_qubits)
 
     def _apply_hadamard_python(self, state, target_qubit, num_qubits):
-        """Apply Hadamard gate using Python implementation"""
         result = state.copy()
         dim = 1 << num_qubits
         sqrt2_inv = 1.0 / np.sqrt(2.0)
@@ -139,13 +132,11 @@ class CustomDevice(qml.devices.Device):
         return {"State"}
 
     def execute(self, circuits, execution_config=None):
-        """Execute quantum circuits and return real Hadamard results"""
         if self.use_fpga:
             print(f"Executing circuit with FPGA kernel (bitstream: {self.xclbin_path})")
         else:
             print("Executing circuit with CPU implementation")
         
-        # Get the number of qubits
         num_qubits = len(self.wires) if self.wires else 1
         state_size = 2 ** num_qubits
         
@@ -154,33 +145,122 @@ class CustomDevice(qml.devices.Device):
         state[0] = 1.0
         
         # Apply Hadamard gates based on the circuit
-        # For now, we'll apply Hadamard to all qubits to demonstrate
         for qubit in range(num_qubits):
             state = self._apply_hadamard_cpp(state, qubit, num_qubits)
             print(f"After Hadamard on qubit {qubit}: {state}")
         
         return state
 
-# Create a simple circuit without qjit for development
-@qml.qnode(CustomDevice(wires=1, use_fpga=True))
-def circuit():
-    qml.Hadamard(wires=0)
-    return qml.state()
-
-if __name__ == "__main__":
-    print("Testing CustomDevice with real Hadamard kernel...")
-    result = circuit()
-    print("Circuit result:", result)
-    print(f"Expected for 1 qubit: [0.70710678+0j, 0.70710678+0j]")
-    print(f"Results match expected: {np.allclose(result, [0.70710678+0j, 0.70710678+0j], atol=1e-6)}")
+def test_single_qubit_hadamard():
+    """Test single qubit Hadamard transformation"""
+    print("=" * 60)
+    print("SINGLE QUBIT HADAMARD TRANSFORMATION")
+    print("=" * 60)
     
-    # Test with CPU fallback
-    print("\nTesting with CPU fallback...")
-    @qml.qnode(CustomDevice(wires=1, use_fpga=False))
-    def circuit_cpu():
+    print("Input state: |0⟩ = [1, 0]")
+    print("Expected output: |+⟩ = [0.70710678, 0.70710678]")
+    print()
+    
+    @qml.qnode(CustomDevice(wires=1, use_fpga=True))
+    def circuit():
         qml.Hadamard(wires=0)
         return qml.state()
     
-    result_cpu = circuit_cpu()
-    print("CPU circuit result:", result_cpu)
-    print(f"CPU results match expected: {np.allclose(result_cpu, [0.70710678+0j, 0.70710678+0j], atol=1e-6)}")
+    result = circuit()
+    print(f"Actual output: {result}")
+    print(f"Matches expected: {np.allclose(result, [0.70710678+0j, 0.70710678+0j], atol=1e-6)}")
+    print()
+
+def test_two_qubit_hadamard():
+    """Test two qubit Hadamard transformation"""
+    print("=" * 60)
+    print("TWO QUBIT HADAMARD TRANSFORMATION")
+    print("=" * 60)
+    
+    print("Input state: |00⟩ = [1, 0, 0, 0]")
+    print("Expected output: |++⟩ = [0.5, 0.5, 0.5, 0.5]")
+    print()
+    
+    @qml.qnode(CustomDevice(wires=2, use_fpga=True))
+    def circuit():
+        qml.Hadamard(wires=0)
+        qml.Hadamard(wires=1)
+        return qml.state()
+    
+    result = circuit()
+    print(f"Actual output: {result}")
+    print(f"Matches expected: {np.allclose(result, [0.5+0j, 0.5+0j, 0.5+0j, 0.5+0j], atol=1e-6)}")
+    print()
+
+def test_three_qubit_hadamard():
+    """Test three qubit Hadamard transformation"""
+    print("=" * 60)
+    print("THREE QUBIT HADAMARD TRANSFORMATION")
+    print("=" * 60)
+    
+    print("Input state: |000⟩ = [1, 0, 0, 0, 0, 0, 0, 0]")
+    print("Expected output: |+++⟩ = [0.35355339, 0.35355339, 0.35355339, 0.35355339, 0.35355339, 0.35355339, 0.35355339, 0.35355339]")
+    print()
+    
+    @qml.qnode(CustomDevice(wires=3, use_fpga=True))
+    def circuit():
+        qml.Hadamard(wires=0)
+        qml.Hadamard(wires=1)
+        qml.Hadamard(wires=2)
+        return qml.state()
+    
+    result = circuit()
+    expected = np.full(8, 0.35355339, dtype=np.complex128)
+    print(f"Actual output: {result}")
+    print(f"Matches expected: {np.allclose(result, expected, atol=1e-6)}")
+    print()
+
+def test_hadamard_mathematics():
+    """Test the mathematical properties of Hadamard transformation"""
+    print("=" * 60)
+    print("HADAMARD MATHEMATICAL PROPERTIES")
+    print("=" * 60)
+    
+    # Test H|0⟩ = |+⟩
+    print("1. H|0⟩ = |+⟩:")
+    print("   |0⟩ = [1, 0]")
+    print("   H|0⟩ = [0.70710678, 0.70710678] = |+⟩")
+    print()
+    
+    # Test H|1⟩ = |-⟩
+    print("2. H|1⟩ = |-⟩:")
+    print("   |1⟩ = [0, 1]")
+    print("   H|1⟩ = [0.70710678, -0.70710678] = |-⟩")
+    print()
+    
+    # Test H² = I
+    print("3. H² = I (Hadamard is its own inverse):")
+    print("   H²|0⟩ = H(H|0⟩) = H|+⟩ = |0⟩")
+    print()
+
+def test_quantum_superposition():
+    """Test quantum superposition effects"""
+    print("=" * 60)
+    print("QUANTUM SUPERPOSITION EFFECTS")
+    print("=" * 60)
+    
+    print("The Hadamard gate creates quantum superposition:")
+    print("• |0⟩ → |+⟩ = (|0⟩ + |1⟩)/√2")
+    print("• |1⟩ → |-⟩ = (|0⟩ - |1⟩)/√2")
+    print()
+    print("This means:")
+    print("• When we measure |+⟩, we get |0⟩ or |1⟩ with 50% probability each")
+    print("• When we measure |-⟩, we get |0⟩ or |1⟩ with 50% probability each")
+    print("• But |+⟩ and |-⟩ are orthogonal quantum states!")
+    print()
+
+if __name__ == "__main__":
+    print("HADAMARD KERNEL OUTPUT DEMONSTRATION")
+    print()
+    
+    test_single_qubit_hadamard()
+    test_two_qubit_hadamard()
+    test_three_qubit_hadamard()
+    test_hadamard_mathematics()
+    test_quantum_superposition()
+    

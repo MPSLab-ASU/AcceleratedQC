@@ -13,6 +13,17 @@
 #include "QubitManager.hpp"
 #include "Types.h"
 
+// Forward declaration for the Hadamard kernel interface
+namespace Catalyst::Runtime::Devices {
+    int hadamard_kernel_execute(
+        const std::string& xclbin_path,
+        const std::vector<std::complex<double>>& input_state, 
+        std::vector<std::complex<double>>& output_state, 
+        int target, 
+        int num_qubits
+    );
+}
+
 namespace Catalyst::Runtime::Devices {
 
 struct CustomDevice : public QuantumDevice {
@@ -44,10 +55,14 @@ struct CustomDevice : public QuantumDevice {
 
 private:
     void applyHadamard(QubitIdType wire);
+    void applyHadamardCPU(QubitIdType wire);
     void getState(DataView<std::complex<double>, 1> &state);
+    bool useFPGAKernel() const;
 
     size_t num_qubits_{0};
     std::vector<std::complex<double>> state_;
+    std::string xclbin_path_{"libadf.xclbin"}; // Path to FPGA bitstream
+    bool use_fpga_{true}; // Flag to enable/disable FPGA kernel usage
 };
 
 } // namespace Catalyst::Runtime::Devices
